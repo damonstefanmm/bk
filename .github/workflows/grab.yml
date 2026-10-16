@@ -1,0 +1,54 @@
+name: botkeep-grab
+
+on:
+  workflow_dispatch: # 由 Cloudflare Worker 每 5 分钟触发，也可以手动点运行
+
+concurrency:
+  group: botkeep-grab
+  cancel-in-progress: false
+
+jobs:
+  grab:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      VMESS_LINK: ${{ secrets.VMESS_LINK }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install undici
+        run: npm install --no-save --no-audit --no-fund undici@6.21.0
+
+      # 填了 VMESS_LINK 才会启动代理；没填就直连
+      - name: Start Xray (vmess proxy)
+        if: ${{ env.VMESS_LINK != '' }}
+        run: |
+          curl -fsSL -o xray.zip https://github.com/XTLS/Xray-core/releases/latest/download/Xray-linux-64.zip
+          unzip -q -o xray.zip xray -d ./xray-bin
+          node make-xray-config.mjs > xray-config.json
+          nohup ./xray-bin/xray run -c xray-config.json > xray.log 2>&1 &
+          sleep 3
+          echo "代理出口 IP："
+          if curl -s --max-time 15 -x http://127.0.0.1:10809 https://api.ipify.org; then
+            echo ""
+            echo "PROXY_URL=http://127.0.0.1:10809" >> "$GITHUB_ENV"
+          else
+            echo "❌ vmess 代理连不通，Xray 日志如下："
+            cat xray.log
+            exit 1
+          fi
+
+      - name: Grab Botkeep server
+        run: node grab.mjs
+        env:
+          BOTKEEP_EMAIL: ${{ secrets.BOTKEEP_EMAIL }}
+          BOTKEEP_PASSWORD: ${{ secrets.BOTKEEP_PASSWORD }}
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+          RUNTIME: "python"
+          RUN_SECONDS: "240"
+          INTERVAL_SECONDS: "20"
