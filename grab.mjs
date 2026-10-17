@@ -189,11 +189,15 @@ function matchList(nodeInfo, list) {
   return '';
 }
 
-// 删除机器：DELETE /api/v1/panel/bots/{id}（2026-10-17 面板删除流程验证有效）。
-// 注意：服务端要求 JSON 请求，DELETE 必须带 Content-Type: application/json（body 传 {}），
-// 否则返回 415 "JSON requests are required."。
+// 删除机器（实测 2026-10-17，扒面板前端 service-BiNdzWNY.js 源码确认）：
+// POST /api/v1/panel/bots/{id}/actions，body {"action":"delete"}。
+// 注意：不是 REST 惯例的 DELETE /bots/{id}（会 405 Method Not Allowed），
+// 且必须带 JSON Content-Type（否则 415 "JSON requests are required."）。
 async function deleteBot(id) {
-  const res = await api(`/api/v1/panel/bots/${id}`, { method: 'DELETE', body: {} });
+  const res = await api(`/api/v1/panel/bots/${id}/actions`, {
+    method: 'POST',
+    body: { action: 'delete' },
+  });
   return res;
 }
 
