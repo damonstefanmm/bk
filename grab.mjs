@@ -251,7 +251,10 @@ async function runAccount({ email, password, idx }, total) {
       const bid = b.id || '';
       const info = extractNodeInfo(b);
       const label = info.raw ? info.raw.slice(0, 80) : '(未识别)';
-      if (PROTECTED_BOT_IDS.includes(bid)) {
+      // 双保险：ID 精确匹配，或 seven 账号的 node10 机器（防 ID 转录笔误）
+      const isProtected = PROTECTED_BOT_IDS.includes(bid) ||
+        (email === 'seven@onepuchman.ggff.net' && info.nums.includes(10));
+      if (isProtected) {
         log(`${tag}机器 ${b.name || bid} 在保护名单内，保留并跳过`);
         hasKeep = true;
       } else if (NODE_WHITELIST.length && info.nums.length && !matchList(info, NODE_WHITELIST)) {
