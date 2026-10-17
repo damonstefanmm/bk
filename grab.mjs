@@ -114,32 +114,38 @@ async function tg(text) {
   } catch (e) { log('TG 发送失败', e.message); }
 }
 
-// 从一个或多个对象里提取节点标识：把所有候选字段拼成字符串，
-// 再从中解析节点编号（如 "node4.botkeep.cloud" / "node2-it" / "eu-04" / 数字 4 → 编号 4）。
-// 字段名和标识格式未经实测验证——只做"多字段合并+编号提取"，
-// 解析不出编号时走保守路径（保留机器+人工确认），绝不误删。
+// 节点识别（实测结论 2026-10-17，直连面板 API 验证）：
+// Botkeep 里节点就是 bot 对象上的数字字段 placementNodeId，
+// 创建返回 / GET /api/v1/panel/bots/{id} / dashboard 的 bot 对象里都有，
+// 实测 placementNodeId=8 的机器面板上显示为 node8。
+// 映射规则：placementNodeId N（1~11）即 nodeN；超出 1~11 的一律不认，走保守路径。
+// 找不到编号时返回空，走保守路径（保留+人工确认），绝不误删。
 function extractNodeInfo(...objs) {
-  const candidates = [];
-  for (const obj of objs) {
-    if (!obj || typeof obj !== 'object') continue;
-    const b = obj?.bot || obj || {};
-    const nested = b.server || b.instance || {};
-    candidates.push(
-      b.node, b.hostname, b.host, b.nodeName, b.node_id, b.nodeId,
-      b.datacenter, b.region, b.location,
-      nested.node, nested.hostname, nested.host, nested.datacenter, nested.region,
-    );
-  }
-  const strs = [];
   const nums = new Set();
-  for (const c of candidates) {
-    if (typeof c === 'number' && Number.isInteger(c) && c >= 1 && c <= 99) nums.add(String(c));
-    else if (typeof c === 'string' && c.trim()) strs.push(c.trim());
-  }
-  const raw = strs.join(' | ').toLowerCase();
-  for (const m of raw.matchAll(/node\s*0*(\d+)/g)) nums.add(String(Number(m[1])));
-  for (const m of raw.matchAll(/\beu[-\s]?0*(\d{1,2})\b/g)) nums.add(String(Number(m[1])));
-  return { raw, nums: [...nums] };
+  const hits = [];
+  const walk = (v, depth) => {
+    if (v == null || depth > 4) return;
+    if (Array.isArray(v)) { v.forEach((x) => walk(x, depth + 1)); return; }
+    if (typeof v !== 'object') return;
+    for (const [k, val] of Object.entries(v)) {
+      if (/^placementnodeid$/i.test(k) && typeof val === 'number' && Number.isInteger(val)) {
+        if (val >= 1 && val <= 11) {
+          nums.add(String(val));
+          hits.push(`placementNodeId=${val}→node${val}`);
+        } else {
+          hits.push(`placementNodeId=${val}(未知节点)`);
+        }
+      } else if (typeof val === 'string' && val) {
+        // 兜底：字符串里出现 nodeN / eu-NN 也抓出来（如 node8.botkeep.cloud）
+        const t = val.toLowerCase();
+        for (const m of t.matchAll(/\bnode\s*0*(\d{1,2})\b/g)) { nums.add(String(Number(m[1]))); hits.push(m[0]); }
+        for (const m of t.matchAll(/\beu[-\s]?0*(\d{1,2})\b/g)) { nums.add(String(Number(m[1]))); hits.push(m[0]); }
+      }
+      walk(val, depth + 1);
+    }
+  };
+  objs.forEach((o) => walk(o, 0));
+  return { raw: [...new Set(hits)].slice(0, 5).join(','), nums: [...nums] };
 }
 
 // 创建后节点可能是异步分配的：查详情（重试3次）→ 兜底查 dashboard，按 id 或 name 找
