@@ -1,9 +1,10 @@
 name: botkeep-grab
 
 on:
-  workflow_dispatch: # 手动触发入口保留
-  schedule:
-    - cron: '*/5 * * * *'
+  workflow_dispatch: # Cloudflare Worker 每 5 分钟触发；手动触发入口保留
+  # schedule:
+  #   - cron: '*/5 * * * *'
+
 
 concurrency:
   group: botkeep-grab
