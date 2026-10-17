@@ -53,6 +53,12 @@ const NODE_WHITELIST = (env.NODE_WHITELIST || '')
   .split(',')
   .map((s) => s.trim().toLowerCase())
   .filter(Boolean);
+// ---------- 保护名单：PROTECTED_BOT_IDS，英文逗号分隔的机器 ID ----------
+// 填在这里的机器 ID 在存量清理时永远跳过、不删除（用于保留已下掉白名单节点的机器）
+const PROTECTED_BOT_IDS = (env.PROTECTED_BOT_IDS || '')
+  .split(',')
+  .map((s) => s.trim())
+  .filter(Boolean);
 const BLACKLIST_PAUSE_SECONDS = Number(env.BLACKLIST_PAUSE_SECONDS || 600);
 
 // 每个账号独立的登录态（多账号串行跑，跑下一个账号前重置）
@@ -244,7 +250,10 @@ async function runAccount({ email, password, idx }, total) {
       const bid = b.id || '';
       const info = extractNodeInfo(b);
       const label = info.raw ? info.raw.slice(0, 80) : '(未识别)';
-      if (NODE_WHITELIST.length && info.nums.length && !matchList(info, NODE_WHITELIST)) {
+      if (PROTECTED_BOT_IDS.includes(bid)) {
+        log(`${tag}机器 ${b.name || bid} 在保护名单内，保留并跳过`);
+        hasKeep = true;
+      } else if (NODE_WHITELIST.length && info.nums.length && !matchList(info, NODE_WHITELIST)) {
         log(`${tag}存量机器 ${b.name || bid} 落点 ${label} 不在白名单，删除…`);
         try {
           await deleteBotWithRetry(bid, tag);
