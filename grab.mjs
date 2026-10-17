@@ -114,26 +114,52 @@ async function tg(text) {
   } catch (e) { log('TG 发送失败', e.message); }
 }
 
-// 从创建返回里提取节点标识：把所有候选字段拼成一个字符串，
-// 再从中解析节点编号（如 "node4.botkeep.cloud" / "node2-it" / "eu-04" → 编号 4）。
+// 从一个或多个对象里提取节点标识：把所有候选字段拼成字符串，
+// 再从中解析节点编号（如 "node4.botkeep.cloud" / "node2-it" / "eu-04" / 数字 4 → 编号 4）。
 // 字段名和标识格式未经实测验证——只做"多字段合并+编号提取"，
 // 解析不出编号时走保守路径（保留机器+人工确认），绝不误删。
-function extractNodeInfo(bot) {
-  const b = bot?.bot || bot || {};
-  const nested = b.server || b.instance || {};
-  const candidates = [
-    b.node, b.hostname, b.host, b.nodeName, b.node_id, b.nodeId,
-    b.datacenter, b.region, b.location,
-    nested.node, nested.hostname, nested.host, nested.datacenter, nested.region,
-  ];
-  const raw = candidates
-    .filter((c) => typeof c === 'string' && c.trim())
-    .join(' | ')
-    .toLowerCase();
+function extractNodeInfo(...objs) {
+  const candidates = [];
+  for (const obj of objs) {
+    if (!obj || typeof obj !== 'object') continue;
+    const b = obj?.bot || obj || {};
+    const nested = b.server || b.instance || {};
+    candidates.push(
+      b.node, b.hostname, b.host, b.nodeName, b.node_id, b.nodeId,
+      b.datacenter, b.region, b.location,
+      nested.node, nested.hostname, nested.host, nested.datacenter, nested.region,
+    );
+  }
+  const strs = [];
   const nums = new Set();
+  for (const c of candidates) {
+    if (typeof c === 'number' && Number.isInteger(c) && c >= 1 && c <= 99) nums.add(String(c));
+    else if (typeof c === 'string' && c.trim()) strs.push(c.trim());
+  }
+  const raw = strs.join(' | ').toLowerCase();
   for (const m of raw.matchAll(/node\s*0*(\d+)/g)) nums.add(String(Number(m[1])));
   for (const m of raw.matchAll(/\beu[-\s]?0*(\d{1,2})\b/g)) nums.add(String(Number(m[1])));
   return { raw, nums: [...nums] };
+}
+
+// 创建后节点可能是异步分配的：查详情（重试3次）→ 兜底查 dashboard，按 id 或 name 找
+async function fetchBotDetails(id, tag) {
+  for (let i = 0; i < 3; i++) {
+    try {
+      const d = await api(`/api/v1/panel/bots/${id}`);
+      const probe = extractNodeInfo(d);
+      if (probe.nums.length || probe.raw) return d;
+      log(`${tag}详情第${i + 1}次：还没拿到节点信息`);
+    } catch (e) { log(`${tag}取机器详情失败(${i + 1}/3)：${e.message}`); }
+    await sleep(5);
+  }
+  try {
+    const dash = await api('/api/v1/panel/dashboard');
+    const bots = Array.isArray(dash?.bots) ? dash.bots : [];
+    const hit = bots.find((b) => (b.id || b.bot?.id) === id || (b.name || b.bot?.name) === NAME);
+    if (hit) { log(`${tag}从 dashboard 找到机器`); return hit; }
+  } catch (e) { log(`${tag}取 dashboard 失败：${e.message}`); }
+  return null;
 }
 
 // 名单条目里的编号： "node2-it"→"2"， "node10"→"10"，无编号返回 ''
@@ -222,7 +248,16 @@ async function runAccount({ email, password, idx }, total) {
           },
         });
         const id = bot?.id || bot?.bot?.id || '';
-        const nodeInfo = extractNodeInfo(bot);
+        let nodeInfo = extractNodeInfo(bot);
+        // 创建返回里可能还没有节点信息（异步分配）→ 查详情重试
+        if (!nodeInfo.nums.length) {
+          log(`${tag}创建返回里没拿到节点编号，取详情重试…`);
+          const details = await fetchBotDetails(id, tag);
+          if (details) {
+            nodeInfo = extractNodeInfo(bot, details);
+            log(`${tag}详情取回 node=${nodeInfo.raw ? nodeInfo.raw.slice(0, 120) : '(仍未识别)'} 解析编号=[${nodeInfo.nums.join(',') || '-'}]`);
+          }
+        }
         const nodeLabel = nodeInfo.raw ? nodeInfo.raw.slice(0, 160) : '(未识别)';
         log(`${tag}创建成功 id=${id} node=${nodeLabel} 解析编号=[${nodeInfo.nums.join(',') || '-'}]`);
         log(`${tag}创建返回原文：`, JSON.stringify(bot).slice(0, 800));
