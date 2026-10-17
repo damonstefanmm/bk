@@ -189,9 +189,11 @@ function matchList(nodeInfo, list) {
   return '';
 }
 
-// 删除机器（接口为按 REST 惯例推测：DELETE /api/v1/panel/bots/{id}）
+// 删除机器：DELETE /api/v1/panel/bots/{id}（2026-10-17 面板删除流程验证有效）。
+// 注意：服务端要求 JSON 请求，DELETE 必须带 Content-Type: application/json（body 传 {}），
+// 否则返回 415 "JSON requests are required."。
 async function deleteBot(id) {
-  const res = await api(`/api/v1/panel/bots/${id}`, { method: 'DELETE' });
+  const res = await api(`/api/v1/panel/bots/${id}`, { method: 'DELETE', body: {} });
   return res;
 }
 
