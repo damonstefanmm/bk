@@ -201,6 +201,27 @@ async function deleteBot(id) {
   return res;
 }
 
+// 删除带 409 重试：刚创建/操作中的机器，服务端会返回
+// 409 "Another operation is already in progress for this workload"，
+// 等 30 秒重试，最多 10 次（约 5 分钟），超时则抛错。
+async function deleteBotWithRetry(id, tag) {
+  const maxAttempts = 10;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      await deleteBot(id);
+      return;
+    } catch (e) {
+      const is409 = e.status === 409 || String(e.message || '').includes('409');
+      if (is409 && attempt < maxAttempts) {
+        log(`${tag}删除被拒（409，机器操作进行中），30 秒后重试 (${attempt}/${maxAttempts})`);
+        await sleep(30000);
+        continue;
+      }
+      throw e;
+    }
+  }
+}
+
 async function runAccount({ email, password, idx }, total) {
   jar = new Map();
   csrf = null;
@@ -211,11 +232,35 @@ async function runAccount({ email, password, idx }, total) {
   csrf = (await api('/api/v1/auth/session')).csrf_token;
   log(`${tag}登录成功`);
 
-  // 已经有服务器就不再创建（只记日志，不发 TG，免得每次触发都刷屏）
+  // 已有服务器：逐台检查节点
+  // - 确认落在非白名单节点 → 删除（带 409 重试），删完继续抢
+  // - 白名单内或节点无法确认 → 保守保留，跳过本账号
+  // （只记日志不刷屏 TG，删存量时发一条 TG 说明）
   const dash = await api('/api/v1/panel/dashboard');
-  if (Array.isArray(dash?.bots) && dash.bots.length > 0) {
-    log(`${tag}已有服务器：` + dash.bots.map((b) => b.name || b.id).join(', ') + '，跳过');
-    return;
+  const existing = Array.isArray(dash?.bots) ? dash.bots : [];
+  if (existing.length > 0) {
+    let hasKeep = false;
+    for (const b of existing) {
+      const bid = b.id || '';
+      const info = extractNodeInfo(b);
+      const label = info.raw ? info.raw.slice(0, 80) : '(未识别)';
+      if (NODE_WHITELIST.length && info.nums.length && !matchList(info, NODE_WHITELIST)) {
+        log(`${tag}存量机器 ${b.name || bid} 落点 ${label} 不在白名单，删除…`);
+        try {
+          await deleteBotWithRetry(bid, tag);
+          log(`${tag}存量机器 ${b.name || bid} 已删除`);
+          await tg(`🗑️ Botkeep：${tag}存量机器 ${b.name || bid}（落点 ${label}）不在白名单，已删除。`);
+        } catch (e) {
+          log(`${tag}存量机器删除失败：${e.message}，跳过本账号`);
+          return;
+        }
+      } else {
+        log(`${tag}已有服务器：${b.name || bid}（落点 ${label}），保留并跳过`);
+        hasKeep = true;
+      }
+    }
+    if (hasKeep) return;
+    log(`${tag}存量非白名单机器已清空，继续抢`);
   }
 
   // 找运行时（名字可能叫 python / python3 之类，自动匹配）
@@ -303,7 +348,7 @@ async function runAccount({ email, password, idx }, total) {
           const pauseMin = Math.round(BLACKLIST_PAUSE_SECONDS / 60);
           log(`${tag}命中删除规则(${deleteReason})，删除机器 ${id}（落点 ${nodeLabel}）`);
           try {
-            await deleteBot(id);
+            await deleteBotWithRetry(id, tag);
           } catch (e) {
             // 删除失败：名额已被占用，继续轮询没有意义，提醒人工处理后结束本账号
             log(`${tag}删除失败：${e.message}，请手动去面板删除`);
