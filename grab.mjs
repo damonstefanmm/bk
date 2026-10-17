@@ -55,7 +55,8 @@ const NODE_WHITELIST = (env.NODE_WHITELIST || '')
   .filter(Boolean);
 // ---------- 保护名单：PROTECTED_BOT_IDS，英文逗号分隔的机器 ID ----------
 // 填在这里的机器 ID 在存量清理时永远跳过、不删除（用于保留已下掉白名单节点的机器）
-const PROTECTED_BOT_IDS = (env.PROTECTED_BOT_IDS || '')
+// 兜底写死 2026-10-17 保留的那台 node10（seven 账号 a4ea6d86）；如设了 secret 则 secret 优先
+const PROTECTED_BOT_IDS = (env.PROTECTED_BOT_IDS || 'a4ea6d86-7751-4d3c-ac26-34a11b65c91e')
   .split(',')
   .map((s) => s.trim())
   .filter(Boolean);
