@@ -13,7 +13,7 @@ concurrency:
 jobs:
   grab:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 30
     env:
       VMESS_LINK: ${{ secrets.VMESS_LINK }}
     steps:
