@@ -2,6 +2,9 @@ name: botkeep-grab
 
 on:
   workflow_dispatch: # 由 Cloudflare Worker 每 5 分钟触发，也可以手动点运行
+  # 不想配 Worker 的话，取消下面两行的注释，改用 Actions 自带定时（注意：fork 仓库 60 天无活动会被自动停用）
+  # schedule:
+  #   - cron: '*/5 * * * *'
 
 concurrency:
   group: botkeep-grab
@@ -49,6 +52,14 @@ jobs:
           BOTKEEP_PASSWORD: ${{ secrets.BOTKEEP_PASSWORD }}
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
-          RUNTIME: "python"
+          RUNTIME: "nodejs"
+          # 想锁定大版本（如 24）可加这一行；不填则用平台返回的第一个可用版本
+          # RUNTIME_VERSION: "24"
           RUN_SECONDS: "240"
           INTERVAL_SECONDS: "20"
+          # 黑名单：逗号分隔，子串匹配（不区分大小写），为空则不启用
+          NODE_BLACKLIST: ${{ secrets.NODE_BLACKLIST }}
+          # 白名单：只保留这些节点的机器，其余自动删除；与黑名单同时设置时白名单优先
+          NODE_WHITELIST: ${{ secrets.NODE_WHITELIST }}
+          # 命中黑名单后暂停多少秒再继续抢（默认 600 = 10 分钟）
+          BLACKLIST_PAUSE_SECONDS: "600"
